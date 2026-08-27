@@ -51,7 +51,7 @@ def get_last_status():
             return None
     return None
 
-# Uygulama açılışında kayıtlı sürücüleri dosyadan yüklüyoruz (Sıfırlama kaldırıldı)
+# Uygulama açılışında kayıtlı sürücüleri yüklüyoruz
 registered_drivers = load_drivers()
 
 # ==========================================
@@ -73,7 +73,7 @@ def get_keyboard_for_user(user_id: int):
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 # ==========================================
-# START KOMUTU (ONAY KONTROLÜ)
+# START KOMUTU (ÇÖKMEYE KARŞI KORUMALI)
 # ==========================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
@@ -83,9 +83,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user.id == MY_ADMIN_ID or user.id == MERKEZ_ID:
         role_title = "Yönetici" if user.id == MY_ADMIN_ID else "Merkez"
         await update.message.reply_text(
-            f"🚖 **Merhaba {first_name} ({role_title} Panelindesiniz)**",
-            reply_markup=get_keyboard_for_user(user.id),
-            parse_mode="Markdown"
+            f"🚖 Merhaba {first_name} ({role_title} Panelindesiniz)",
+            reply_markup=get_keyboard_for_user(user.id)
         )
         return
 
@@ -97,7 +96,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     await update.message.reply_text(
-        "⏳ **Erişim Talebiniz Alındı.**\nSistemi kullanabilmeniz için yöneticinin onayı bekleniyor..."
+        "⏳ Erişim Talebiniz Alındı.\nSistemi kullanabilmeniz için yöneticinin onayı bekleniyor..."
     )
 
     admin_keyboard = InlineKeyboardMarkup([
@@ -107,16 +106,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
 
-    await context.bot.send_message(
-        chat_id=MY_ADMIN_ID,
-        text=f"🚨 **Yeni Sürücü Erişim Talebi!**\n\n"
-             f"👤 **Adı:** {first_name}\n"
-             f"🆔 **ID:** `{user_id}`\n"
-             f"👤 **Kullanıcı Adı:** @{user.username if user.username else 'Yok'}\n\n"
-             f"Bu sürücünün bota erişimini onaylıyor musunuz?",
-        reply_markup=admin_keyboard,
-        parse_mode="Markdown"
-    )
+    username_str = f"@{user.username}" if user.username else "Yok"
+    msg_text = f"🚨 Yeni Sürücü Erişim Talebi!\n\n👤 Adı: {first_name}\n🆔 ID: {user_id}\n👤 Kullanıcı Adı: {username_str}\n\nBu sürücünün bota erişimini onaylıyor musunuz?"
+
+    try:
+        await context.bot.send_message(
+            chat_id=MY_ADMIN_ID,
+            text=msg_text,
+            reply_markup=admin_keyboard
+        )
+    except Exception as e:
+        print(f"Yöneticiye bildirim gönderilirken hata oluştu (Yönetici bota /start yazmamış olabilir): {e}")
 
 # ==========================================
 # ALT MENÜ BUTONLARI VE MESAJ İŞLEMCİSİ
@@ -139,28 +139,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             drivers_list = {k: v for k, v in registered_drivers.items() if k not in [merkez_str_id, admin_str_id]}
             total_count = len(drivers_list)
 
-            msg = f"📊 **AKTİF SÜRÜCÜ DURUMU**\n"
-            msg += f"👑 Merkez ve Yönetici Hariç Sürücü Sayısı: **{total_count}**\n\n"
+            msg = f"📊 AKTİF SÜRÜCÜ DURUMU\n"
+            msg += f"👑 Merkez ve Yönetici Hariç Sürücü Sayısı: {total_count}\n\n"
 
             if total_count > 0:
-                msg += "📋 **Kayıtlı Sürücü Listesi:**\n"
+                msg += "📋 Kayıtlı Sürücü Listesi:\n"
                 for d_id, d_name in drivers_list.items():
-                    msg += f"• **{d_name}** — ID: `{d_id}`\n"
+                    msg += f"• {d_name} — ID: {d_id}\n"
             else:
-                msg += "_Henüz onaylanmış sürücü bulunmuyor._"
+                msg += "Henüz onaylanmış sürücü bulunmuyor."
 
-            await update.message.reply_text(msg, parse_mode="Markdown")
+            await update.message.reply_text(msg)
 
     # --- SON DURUM SORGULAMA ---
     elif text == "🔍 SON DURUM":
         last_status = get_last_status()
         if last_status:
             await update.message.reply_text(
-                f"📢 **EN SON DURUM BİLDİRİMİ**\n\n"
-                f"👤 **Gönderen:** {last_status['user']}\n"
-                f"📌 **Durum:** {last_status['text']}\n"
-                f"⏰ **Saat:** {last_status['time']}",
-                parse_mode="Markdown"
+                f"📢 EN SON DURUM BİLDİRİMİ\n\n"
+                f"👤 Gönderen: {last_status['user']}\n"
+                f"📌 Durum: {last_status['text']}\n"
+                f"⏰ Saat: {last_status['time']}"
             )
         else:
             await update.message.reply_text("ℹ️ Henüz girilmiş bir durum bildirimi bulunmuyor.")
@@ -179,8 +178,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Durumu dosyaya kaydet
         save_last_status(text, user.first_name)
 
-        # Sadece durumu değiştiren kişiye (Merkez/Admin) teyit mesajı ver
-        await update.message.reply_text(f"✅ Durum güncellendi: **{text}**\n_(Şoförlere toplu bildirim atılmadı, isteyen 'SON DURUM' butonundan görebilir.)_", parse_mode="Markdown")
+        # Sadece durumu değiştiren kişiye teyit mesajı ver
+        await update.message.reply_text(
+            f"✅ Durum güncellendi: {text}\n(Şoförlere toplu bildirim atılmadı, isteyen 'SON DURUM' butonundan görebilir.)"
+        )
 
 # ==========================================
 # ONAY / RED İŞLEMLERİ
@@ -201,12 +202,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         registered_drivers[target_id] = target_name
         save_drivers(registered_drivers)
 
-        await query.edit_message_text(f"✅ **{target_name}** (`{target_id}`) sürücüsü onaylandı ve sisteme eklendi.")
+        await query.edit_message_text(f"✅ {target_name} ({target_id}) sürücüsü onaylandı ve sisteme eklendi.")
 
         try:
             await context.bot.send_message(
                 chat_id=int(target_id),
-                text="🎉 **Erişim Talebiniz Onaylandı!**\nSistemi kullanabilirsiniz. Başlamak için /start yazabilirsiniz.",
+                text="🎉 Erişim Talebiniz Onaylandı!\nSistemi kullanabilirsiniz. Başlamak için /start yazabilirsiniz.",
                 reply_markup=get_keyboard_for_user(int(target_id))
             )
         except Exception:
@@ -219,11 +220,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         _, target_id, target_name = data.split("_", 2)
-        await query.edit_message_text(f"❌ **{target_name}** (`{target_id}`) sürücüsünün talebi reddedildi.")
+        await query.edit_message_text(f"❌ {target_name} ({target_id}) sürücüsünün talebi reddedildi.")
         try:
             await context.bot.send_message(
                 chat_id=int(target_id),
-                text="🚫 **Erişim Talebiniz Reddedildi.**"
+                text="🚫 Erişim Talebiniz Reddedildi."
             )
         except Exception:
             pass

@@ -11,22 +11,21 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, Cal
 BOT_TOKEN = "8922084774:AAGJRthYR1LH9O2ZhyE3JwBVzfsZ8jwzse4"
 
 MERKEZ_ID = 8860608922     # Merkez Telefonu ID
-MY_ADMIN_ID = 8955129085   # Yönetici (Sizin) ID
+MY_ADMIN_ID = 8955129085   # Yönetici ID
 
 DATA_FILE = "registered_drivers.json"
 STATUS_FILE = "last_status.json"
 
-# Kayıtlı sürücüleri sıfırla ve dosyayı temizle
-def reset_and_init_drivers():
-    drivers = {}
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(drivers, f, ensure_ascii=False, indent=4)
-    return drivers
-
+# ==========================================
+# DOSYA İŞLEMLERİ (VERİ TABANI MANTIĞI)
+# ==========================================
 def load_drivers():
     if os.path.exists(DATA_FILE):
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
     return {}
 
 def save_drivers(drivers):
@@ -45,18 +44,20 @@ def save_last_status(status_text, user_name):
 
 def get_last_status():
     if os.path.exists(STATUS_FILE):
-        with open(STATUS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
+        try:
+            with open(STATUS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return None
     return None
 
-# Listeyi sıfırdan başlatıyoruz
-registered_drivers = reset_and_init_drivers()
+# Uygulama açılışında kayıtlı sürücüleri dosyadan yüklüyoruz (Sıfırlama kaldırıldı)
+registered_drivers = load_drivers()
 
 # ==========================================
 # MENÜLER (YETKİYE GÖRE AYRI MENÜ)
 # ==========================================
 def get_keyboard_for_user(user_id: int):
-    # Yönetici veya Merkez ise tam menü gösterilir
     if user_id == MY_ADMIN_ID or user_id == MERKEZ_ID:
         keyboard = [
             ["🔴 DÖNÜŞLER MERKEZ"],
@@ -66,7 +67,6 @@ def get_keyboard_for_user(user_id: int):
             ["🔍 SON DURUM", "📊 AKTİF KİŞİ SAYISI"]
         ]
     else:
-        # Diğer tüm sürücülerde SADECE Son Durum butonu bulunur
         keyboard = [
             ["🔍 SON DURUM"]
         ]
@@ -126,7 +126,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = str(user.id)
 
-    # Onay kontrolü
     if user.id != MY_ADMIN_ID and user.id != MERKEZ_ID and user_id not in registered_drivers:
         await update.message.reply_text("🚫 Sisteme kayıtlı değilsiniz veya onay bekliyorsunuz.")
         return
@@ -177,26 +176,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("🚫 Bu butonları kullanma yetkiniz yoktur.")
             return
 
+        # Durumu dosyaya kaydet
         save_last_status(text, user.first_name)
-        notification_text = f"📢 **DURUM GÜNCELLEMESİ**\n👤 {user.first_name}: {text}"
 
-        await update.message.reply_text(f"{user.first_name}: {text}")
-
-        # Onaylı sürücülere bildirimi gönder
-        all_recipients = set(registered_drivers.keys())
-        all_recipients.add(str(MY_ADMIN_ID))
-        all_recipients.add(str(MERKEZ_ID))
-        all_recipients.discard(user_id)
-
-        for recipient_id in all_recipients:
-            try:
-                await context.bot.send_message(
-                    chat_id=int(recipient_id),
-                    text=notification_text,
-                    parse_mode="Markdown"
-                )
-            except Exception:
-                pass
+        # Sadece durumu değiştiren kişiye (Merkez/Admin) teyit mesajı ver
+        await update.message.reply_text(f"✅ Durum güncellendi: **{text}**\n_(Şoförlere toplu bildirim atılmadı, isteyen 'SON DURUM' butonundan görebilir.)_", parse_mode="Markdown")
 
 # ==========================================
 # ONAY / RED İŞLEMLERİ
@@ -246,7 +230,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 # ==========================================
-# ANA ÇALIŞTIRICI
+# ANA ÇALIŞTIRICI (CPU OPTİMİZASYONLU)
 # ==========================================
 def main():
     print("Bot çalışıyor...")
@@ -256,7 +240,8 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_callback))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    app.run_polling()
+    # CPU tasarrufu sağlayan Long Polling konfigürasyonu
+    app.run_polling(poll_interval=2.0, timeout=30)
 
 if __name__ == "__main__":
     main()
